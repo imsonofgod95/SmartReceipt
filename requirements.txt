@@ -2,4 +2,4 @@ streamlit
 easyocr
 opencv-python-headless
 pandas
-plotly
+pillow
