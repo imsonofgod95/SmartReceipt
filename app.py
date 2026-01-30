@@ -7,12 +7,13 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- CONFIGURACIÓN DE IA ---
+# Tu llave personal
 genai.configure(api_key="AIzaSyCocUJXAY1D2b0P_52Kc8BmBatMZvHrhjQ")
 
 st.set_page_config(page_title="SmartReceipt AI - MVP", layout="wide", page_icon="🤖")
 
 st.title("💸 SmartReceipt AI")
-st.markdown("### Control de Gastos Personal con Inteligencia Artificial")
+st.markdown("### Control de Gastos Personal con IA")
 
 # --- MEMORIA DE LA SESIÓN ---
 if 'historial' not in st.session_state:
@@ -33,20 +34,20 @@ def extraer_texto_sucio(archivo):
     results = reader.readtext(processed, detail=0)
     return " ".join(results)
 
-# --- CEREBRO IA (Gemini corregido) ---
+# --- CEREBRO IA (Versión Pro para máxima compatibilidad) ---
 def analizar_con_ia(texto_sucio):
-    # Cambiamos a 'gemini-1.5-flash' para evitar el error 404
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 'gemini-pro' es el modelo más estable para evitar errores 404
+    model = genai.GenerativeModel('gemini-pro')
     
     prompt = f"""
-    Eres un experto en tickets mexicanos. Analiza este texto de OCR:
+    Eres un experto contable. Analiza este texto de ticket:
     {texto_sucio}
     
-    Extrae EXACTAMENTE:
-    Comercio: [Nombre de la tienda o gasolinera]
-    Monto: [Solo el número del total final]
+    Extrae EXACTAMENTE este formato:
+    Comercio: [Nombre]
+    Monto: [Solo número]
     Categoria: [Despensa, Gasolina, Juguetes o Comida]
-    Ubicacion: [Ciudad o zona]
+    Ubicacion: [Zona]
     """
     
     response = model.generate_content(prompt)
@@ -62,10 +63,9 @@ with col1:
     if archivo:
         st.image(archivo, width=300)
         if st.button("🧠 Analizar con IA"):
-            with st.spinner("La IA está trabajando..."):
+            with st.spinner("La IA está analizando..."):
                 try:
                     texto_raw = extraer_texto_sucio(archivo)
-                    # Llamada a la IA
                     resultado_ia = analizar_con_ia(texto_raw)
                     st.session_state['res_ia'] = resultado_ia
                 except Exception as e:
@@ -74,9 +74,10 @@ with col1:
     if 'res_ia' in st.session_state:
         st.divider()
         res = st.session_state['res_ia']
-        st.info(f"Análisis IA:\n{res}")
+        st.info(f"Resultado:\n{res}")
         
         try:
+            # Buscamos el monto y el comercio en la respuesta
             c_sug = re.search(r"Comercio: (.*)", res).group(1)
             m_sug = float(re.search(r"Monto: ([\d.]+)", res).group(1))
         except:
@@ -85,23 +86,16 @@ with col1:
         final_c = st.text_input("Confirmar Comercio", c_sug)
         final_m = st.number_input("Confirmar Monto ($)", value=m_sug)
         
-        if st.button("💾 Guardar en Historial"):
+        if st.button("💾 Guardar"):
             st.session_state.historial.append({
                 "Comercio": final_c, 
                 "Monto": final_m,
                 "Fecha": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
             })
-            st.success("¡Agregado!")
+            st.success("¡Guardado!")
             del st.session_state['res_ia']
 
 with col2:
     st.header("📊 Mis Gastos")
     if st.session_state.historial:
-        df = pd.DataFrame(st.session_state.historial)
-        st.table(df)
-        st.metric("TOTAL", f"${df['Monto'].sum():.2f}")
-        
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Descargar CSV", csv, "gastos.csv")
-    else:
-        st.write("Sube un ticket para ver tu resumen.")
+        df = pd.DataFrame(st.session_state.historial
