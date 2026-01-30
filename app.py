@@ -65,7 +65,7 @@ def extraer_texto_sucio(archivo):
     return re.sub(r"[^\w\s\$\.\:]", "", texto)
 
 # =============================
-# GEMINI CON TIMEOUT
+# GEMINI (MODELO ESTABLE)
 # =============================
 def analizar_con_ia(texto):
     prompt = f"""
@@ -80,11 +80,11 @@ Texto del ticket:
 """
 
     try:
-        model = genai.GenerativeModel("models/gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-1.0-pro")
 
         response = model.generate_content(
             prompt,
-            request_options={"timeout": 15}  # ⏱️ evita cuelgues
+            request_options={"timeout": 15}
         )
 
         return response.text
@@ -165,15 +165,18 @@ with col2:
         st.info("Aún no hay gastos registrados")
 
 # =============================
-# TEST DIRECTO DE GEMINI
+# TEST DIRECTO GEMINI
 # =============================
 st.divider()
-st.subheader("🧪 Test rápido Gemini")
+st.subheader("🧪 Test Gemini")
 
 if st.button("Probar conexión Gemini"):
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
-    r = model.generate_content(
-        "Di hola y dime que Gemini funciona correctamente",
-        request_options={"timeout": 10}
-    )
-    st.success(r.text)
+    try:
+        model = genai.GenerativeModel("gemini-1.0-pro")
+        r = model.generate_content(
+            "Di hola y confirma que Gemini funciona correctamente",
+            request_options={"timeout": 10}
+        )
+        st.success(r.text)
+    except Exception as e:
+        st.error(e)
