@@ -7,7 +7,7 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- CONFIGURACIÓN DE IA ---
-# Tu llave personal
+# Usamos tu llave de API directamente
 genai.configure(api_key="AIzaSyCocUJXAY1D2b0P_52Kc8BmBatMZvHrhjQ")
 
 st.set_page_config(page_title="SmartReceipt AI - MVP", layout="wide", page_icon="🤖")
@@ -34,20 +34,20 @@ def extraer_texto_sucio(archivo):
     results = reader.readtext(processed, detail=0)
     return " ".join(results)
 
-# --- CEREBRO IA (Versión Pro para máxima compatibilidad) ---
+# --- CEREBRO IA ---
 def analizar_con_ia(texto_sucio):
-    # 'gemini-pro' es el modelo más estable para evitar errores 404
-    model = genai.GenerativeModel('gemini-pro')
+    # Usamos gemini-1.5-flash que es la versión más compatible actualmente
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
-    Eres un experto contable. Analiza este texto de ticket:
+    Eres un experto contable mexicano. Analiza este texto de ticket:
     {texto_sucio}
     
     Extrae EXACTAMENTE este formato:
-    Comercio: [Nombre]
-    Monto: [Solo número]
+    Comercio: [Nombre del lugar]
+    Monto: [Solo el número total]
     Categoria: [Despensa, Gasolina, Juguetes o Comida]
-    Ubicacion: [Zona]
+    Ubicacion: [Zona o Ciudad]
     """
     
     response = model.generate_content(prompt)
@@ -58,12 +58,12 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     st.header("📸 1. Cargar Ticket")
-    archivo = st.file_uploader("Sube tu ticket", type=['jpg', 'jpeg', 'png'])
+    archivo = st.file_uploader("Sube tu ticket (JPG, PNG)", type=['jpg', 'jpeg', 'png'])
     
     if archivo:
         st.image(archivo, width=300)
         if st.button("🧠 Analizar con IA"):
-            with st.spinner("La IA está analizando..."):
+            with st.spinner("La IA está analizando tu gasto..."):
                 try:
                     texto_raw = extraer_texto_sucio(archivo)
                     resultado_ia = analizar_con_ia(texto_raw)
@@ -74,10 +74,10 @@ with col1:
     if 'res_ia' in st.session_state:
         st.divider()
         res = st.session_state['res_ia']
-        st.info(f"Resultado:\n{res}")
+        st.info(f"Análisis de la IA:\n{res}")
         
         try:
-            # Buscamos el monto y el comercio en la respuesta
+            # Extraemos datos usando una lógica simple de búsqueda de texto
             c_sug = re.search(r"Comercio: (.*)", res).group(1)
             m_sug = float(re.search(r"Monto: ([\d.]+)", res).group(1))
         except:
@@ -86,16 +86,24 @@ with col1:
         final_c = st.text_input("Confirmar Comercio", c_sug)
         final_m = st.number_input("Confirmar Monto ($)", value=m_sug)
         
-        if st.button("💾 Guardar"):
+        if st.button("💾 Guardar en mi Lista"):
             st.session_state.historial.append({
                 "Comercio": final_c, 
                 "Monto": final_m,
                 "Fecha": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
             })
-            st.success("¡Guardado!")
+            st.success("¡Gasto guardado correctamente!")
             del st.session_state['res_ia']
 
 with col2:
-    st.header("📊 Mis Gastos")
+    st.header("📊 Mis Gastos Registrados")
     if st.session_state.historial:
-        df = pd.DataFrame(st.session_state.historial
+        # Aquí estaba el error del paréntesis, ahora está corregido
+        df = pd.DataFrame(st.session_state.historial)
+        st.dataframe(df, use_container_width=True)
+        st.metric("Total Acumulado", f"${df['Monto'].sum():.2f}")
+        
+        csv = df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Descargar Reporte (CSV)", csv, "mis_gastos.csv")
+    else:
+        st.write("Aún no hay tickets en el historial.")
