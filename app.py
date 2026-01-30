@@ -7,15 +7,15 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- CONFIGURACIÓN DE IA ---
-# Tu llave personal activa
+# Tu llave activa
 genai.configure(api_key="AIzaSyCocUJXAY1D2b0P_52Kc8BmBatMZvHrhjQ")
 
-st.set_page_config(page_title="SmartReceipt AI - MVP", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="SmartReceipt AI", layout="wide", page_icon="🤖")
 
 st.title("💸 SmartReceipt AI")
-st.markdown("### Control de Gastos Personal con IA")
+st.markdown("### Control de Gastos Personal (Fase 1)")
 
-# --- MEMORIA DE LA SESIÓN ---
+# --- MEMORIA ---
 if 'historial' not in st.session_state:
     st.session_state['historial'] = []
 
@@ -34,60 +34,72 @@ def extraer_texto_sucio(archivo):
     results = reader.readtext(processed, detail=0)
     return " ".join(results)
 
-# --- CEREBRO IA (Con protección de errores 404) ---
+# --- CEREBRO IA (Versión Simplificada para Evitar Errores) ---
 def analizar_con_ia(texto_sucio):
-    # Intentamos con el modelo más nuevo, y si no, usamos el pro
-    modelos_a_probar = ['gemini-1.5-flash', 'gemini-pro']
-    
-    prompt = f"Analiza este ticket y extrae exactamente este formato:\nComercio: [Nombre]\nMonto: [Solo numero]\nCategoria: [Tipo]\nUbicacion: [Zona]\n\nTEXTO: {texto_sucio}"
-    
-    for nombre_modelo in modelos_a_probar:
-        try:
-            model = genai.GenerativeModel(nombre_modelo)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            # Si el modelo no existe, intenta con el siguiente de la lista
-            continue
-            
-    return "Error: No se pudo conectar con ningún modelo de IA."
+    try:
+        # Usamos el modelo más estándar disponible actualmente
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Extrae de este ticket:
+        1. Comercio
+        2. Monto (solo numero)
+        3. Categoria (Gasolina, Despensa, Juguetes)
+        
+        TEXTO: {texto_sucio}
+        
+        Formato:
+        Comercio: [Nombre]
+        Monto: [Numero]
+        Categoria: [Tipo]
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error de conexión: {str(e)}"
 
 # --- INTERFAZ ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.header("📸 1. Cargar Ticket")
-    archivo = st.file_uploader("Sube tu ticket", type=['jpg', 'jpeg', 'png'])
+    st.header("📸 Subir Ticket")
+    archivo = st.file_uploader("Imagen del ticket", type=['jpg', 'jpeg', 'png'])
     
     if archivo:
-        st.image(archivo, width=300)
-        if st.button("🧠 Analizar con IA"):
-            with st.spinner("Conectando con el cerebro de Google..."):
-                texto_raw = extraer_texto_sucio(archivo)
-                resultado_ia = analizar_con_ia(texto_raw)
-                st.session_state['res_ia'] = resultado_ia
+        st.image(archivo, width=250)
+        if st.button("🧠 Analizar Gasto"):
+            with st.spinner("IA analizando..."):
+                raw = extraer_texto_sucio(archivo)
+                res = analizar_con_ia(raw)
+                st.session_state['res_ia'] = res
 
     if 'res_ia' in st.session_state:
-        st.divider()
-        res = st.session_state['res_ia']
-        st.info(f"Análisis IA:\n{res}")
+        st.info(st.session_state['res_ia'])
+        
+        # Lógica de extracción simple
+        res_texto = st.session_state['res_ia']
+        c_sug = "Pendiente"
+        m_sug = 0.0
         
         try:
-            c_sug = re.search(r"Comercio: (.*)", res).group(1)
-            m_sug = float(re.search(r"Monto: ([\d.]+)", res).group(1))
+            # Buscamos el monto en el texto que regresó la IA
+            montos_encontrados = re.findall(r"Monto: ([\d.]+)", res_texto)
+            if montos_encontrados:
+                m_sug = float(montos_encontrados[0])
+            
+            comercio_encontrado = re.findall(r"Comercio: (.*)", res_texto)
+            if comercio_encontrado:
+                c_sug = comercio_encontrado[0].strip()
         except:
-            c_sug, m_sug = "Pendiente", 0.0
+            pass
 
-        final_c = st.text_input("Confirmar Comercio", c_sug)
-        final_m = st.number_input("Confirmar Monto ($)", value=m_sug)
+        f_c = st.text_input("Confirmar Comercio", c_sug)
+        f_m = st.number_input("Confirmar Monto", value=m_sug)
         
         if st.button("💾 Guardar"):
-            st.session_state.historial.append({
-                "Comercio": final_c, 
-                "Monto": final_m,
-                "Fecha": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
-            })
-            st.success("¡Agregado!")
+            st.session_state.historial.append({"Comercio": f_c, "Monto": f_m})
+            st.success("¡Guardado!")
             del st.session_state['res_ia']
 
 with col2:
@@ -95,4 +107,6 @@ with col2:
     if st.session_state.historial:
         df = pd.DataFrame(st.session_state.historial)
         st.table(df)
-        st.metric("TOTAL ACUMULADO", f"${df['Monto'].sum():.2f}")
+        st.metric("Total Acumulado", f"${df['Monto'].sum():.2f}")
+    else:
+        st.write("Sube un ticket para ver tu tabla.")
