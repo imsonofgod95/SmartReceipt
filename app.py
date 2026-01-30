@@ -5,21 +5,32 @@ import numpy as np
 import re
 import pandas as pd
 import os
+import time
 import google.generativeai as genai
 
 # =============================
-# CONFIGURACIÓN GEMINI (SEGURA)
+# CONFIGURACIÓN STREAMLIT
 # =============================
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 st.set_page_config(
-    page_title="SmartReceipt AI - Pro",
+    page_title="SmartReceipt AI",
     layout="wide",
-    page_icon="🤖"
+    page_icon="🧾"
 )
 
 st.title("💸 SmartReceipt AI")
-st.markdown("### Control de Gastos Personal (Versión Estable)")
+st.markdown("### Control de Gastos Personal")
+
+# =============================
+# CONFIGURACIÓN GEMINI
+# =============================
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not API_KEY:
+    st.error("❌ GEMINI_API_KEY no está configurada en Secrets")
+    st.stop()
+
+genai.configure(api_key=API_KEY)
+st.success("✅ API Key cargada correctamente")
 
 # =============================
 # MEMORIA DE SESIÓN
@@ -28,7 +39,7 @@ if "historial" not in st.session_state:
     st.session_state.historial = []
 
 # =============================
-# MOTOR OCR
+# OCR
 # =============================
 @st.cache_resource
 def load_reader():
@@ -48,43 +59,38 @@ def extraer_texto_sucio(archivo):
         gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )[1]
 
-    results = reader.readtext(processed, detail=0)
-    texto = " ".join(results)
+    resultados = reader.readtext(processed, detail=0)
+    texto = " ".join(resultados)
 
     return re.sub(r"[^\w\s\$\.\:]", "", texto)
 
 # =============================
-# IA (GEMINI)
+# GEMINI CON TIMEOUT
 # =============================
-def analizar_con_ia(texto_sucio):
-    modelos = [
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-pro"
-    ]
-
+def analizar_con_ia(texto):
     prompt = f"""
-Analiza el siguiente texto de un ticket de compra en México.
-
 Devuelve ÚNICAMENTE este formato:
 
-Comercio: <texto>
-Monto: <numero decimal>
-Categoria: <Gasolina | Despensa | Juguetes | Comida>
+Comercio:
+Monto:
+Categoria: (Gasolina | Despensa | Juguetes | Comida)
 
 Texto del ticket:
-{texto_sucio}
+{texto}
 """
 
-    for modelo in modelos:
-        try:
-            model = genai.GenerativeModel(modelo)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            print(f"Fallo modelo {modelo}: {e}")
-            continue
+    try:
+        model = genai.GenerativeModel("models/gemini-1.5-flash")
 
-    return "Error: Gemini no respondió"
+        response = model.generate_content(
+            prompt,
+            request_options={"timeout": 15}  # ⏱️ evita cuelgues
+        )
+
+        return response.text
+
+    except Exception as e:
+        return f"❌ Error Gemini: {e}"
 
 # =============================
 # INTERFAZ
@@ -93,6 +99,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.header("📸 Subir Ticket")
+
     archivo = st.file_uploader(
         "Imagen del ticket",
         type=["jpg", "jpeg", "png"]
@@ -102,17 +109,22 @@ with col1:
         st.image(archivo, width=280)
 
         if st.button("🧠 Analizar con IA"):
-            with st.spinner("Analizando ticket..."):
+            with st.spinner("Procesando ticket..."):
+                st.write("🔍 Ejecutando OCR...")
                 texto_ocr = extraer_texto_sucio(archivo)
+
+                st.write("📄 Texto detectado:")
+                st.code(texto_ocr[:1000])
+
+                st.write("🤖 Llamando a Gemini...")
                 resultado = analizar_con_ia(texto_ocr)
+
+                st.write("✅ Respuesta recibida")
                 st.session_state.res_ia = resultado
 
     if "res_ia" in st.session_state:
         st.info(st.session_state.res_ia)
 
-        # =============================
-        # PARSEO SEGURO
-        # =============================
         comercio, monto = "Desconocido", 0.0
 
         try:
@@ -136,7 +148,7 @@ with col1:
                 "Monto": f_monto,
                 "Fecha": pd.Timestamp.now().strftime("%d/%m/%Y")
             })
-            st.success("¡Gasto registrado!")
+            st.success("✅ Gasto registrado")
             del st.session_state.res_ia
 
 with col2:
@@ -150,4 +162,18 @@ with col2:
             f"${df['Monto'].sum():.2f}"
         )
     else:
-        st.info("Aún no hay gastos registrados.")
+        st.info("Aún no hay gastos registrados")
+
+# =============================
+# TEST DIRECTO DE GEMINI
+# =============================
+st.divider()
+st.subheader("🧪 Test rápido Gemini")
+
+if st.button("Probar conexión Gemini"):
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    r = model.generate_content(
+        "Di hola y dime que Gemini funciona correctamente",
+        request_options={"timeout": 10}
+    )
+    st.success(r.text)
