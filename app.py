@@ -5,11 +5,10 @@ import numpy as np
 import re
 import pandas as pd
 import os
-import time
 import google.generativeai as genai
 
 # =============================
-# CONFIGURACIÓN STREAMLIT
+# STREAMLIT
 # =============================
 st.set_page_config(
     page_title="SmartReceipt AI",
@@ -21,19 +20,41 @@ st.title("💸 SmartReceipt AI")
 st.markdown("### Control de Gastos Personal")
 
 # =============================
-# CONFIGURACIÓN GEMINI
+# API KEY
 # =============================
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
-    st.error("❌ GEMINI_API_KEY no está configurada en Secrets")
+    st.error("❌ GEMINI_API_KEY no configurada en Secrets")
     st.stop()
 
 genai.configure(api_key=API_KEY)
-st.success("✅ API Key cargada correctamente")
+st.success("✅ API Key cargada")
 
 # =============================
-# MEMORIA DE SESIÓN
+# DETECTAR MODELO DISPONIBLE
+# =============================
+@st.cache_resource
+def obtener_modelo_disponible():
+    for m in genai.list_models():
+        if "generateContent" in m.supported_generation_methods:
+            return m.name
+    return None
+
+MODELO = obtener_modelo_disponible()
+
+if not MODELO:
+    st.error(
+        "❌ Tu API Key NO tiene acceso a ningún modelo Gemini.\n\n"
+        "Solución: crea una API Key nueva en https://aistudio.google.com/app/apikey "
+        "usando un proyecto con Gemini habilitado."
+    )
+    st.stop()
+
+st.success(f"🤖 Usando modelo: {MODELO}")
+
+# =============================
+# SESIÓN
 # =============================
 if "historial" not in st.session_state:
     st.session_state.historial = []
@@ -47,10 +68,9 @@ def load_reader():
 
 reader = load_reader()
 
-def extraer_texto_sucio(archivo):
+def extraer_texto(archivo):
     file_bytes = np.asarray(bytearray(archivo.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-
     if img is None:
         return ""
 
@@ -59,47 +79,40 @@ def extraer_texto_sucio(archivo):
         gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )[1]
 
-    resultados = reader.readtext(processed, detail=0)
-    texto = " ".join(resultados)
-
+    texto = " ".join(reader.readtext(processed, detail=0))
     return re.sub(r"[^\w\s\$\.\:]", "", texto)
 
 # =============================
-# GEMINI (MODELO ESTABLE)
+# IA
 # =============================
 def analizar_con_ia(texto):
     prompt = f"""
-Devuelve ÚNICAMENTE este formato:
+Devuelve SOLO este formato:
 
 Comercio:
 Monto:
-Categoria: (Gasolina | Despensa | Juguetes | Comida)
+Categoria:
 
-Texto del ticket:
+Texto:
 {texto}
 """
-
     try:
-        model = genai.GenerativeModel("gemini-1.0-pro")
-
+        model = genai.GenerativeModel(MODELO)
         response = model.generate_content(
             prompt,
             request_options={"timeout": 15}
         )
-
         return response.text
-
     except Exception as e:
-        return f"❌ Error Gemini: {e}"
+        return f"❌ Error IA: {e}"
 
 # =============================
-# INTERFAZ
+# UI
 # =============================
 col1, col2 = st.columns(2)
 
 with col1:
     st.header("📸 Subir Ticket")
-
     archivo = st.file_uploader(
         "Imagen del ticket",
         type=["jpg", "jpeg", "png"]
@@ -108,75 +121,46 @@ with col1:
     if archivo:
         st.image(archivo, width=280)
 
-        if st.button("🧠 Analizar con IA"):
-            with st.spinner("Procesando ticket..."):
-                st.write("🔍 Ejecutando OCR...")
-                texto_ocr = extraer_texto_sucio(archivo)
+        if st.button("🧠 Analizar"):
+            with st.spinner("Procesando..."):
+                st.write("🔍 OCR…")
+                texto = extraer_texto(archivo)
+                st.code(texto[:1000])
 
-                st.write("📄 Texto detectado:")
-                st.code(texto_ocr[:1000])
+                st.write("🤖 Analizando…")
+                resultado = analizar_con_ia(texto)
+                st.session_state.res = resultado
 
-                st.write("🤖 Llamando a Gemini...")
-                resultado = analizar_con_ia(texto_ocr)
-
-                st.write("✅ Respuesta recibida")
-                st.session_state.res_ia = resultado
-
-    if "res_ia" in st.session_state:
-        st.info(st.session_state.res_ia)
+    if "res" in st.session_state:
+        st.info(st.session_state.res)
 
         comercio, monto = "Desconocido", 0.0
-
         try:
-            m = re.search(r"Monto:\s*([\d\.]+)", st.session_state.res_ia)
-            if m:
-                monto = float(m.group(1))
-
-            c = re.search(r"Comercio:\s*(.*)", st.session_state.res_ia)
-            if c:
-                comercio = c.group(1).strip()
+            c = re.search(r"Comercio:\s*(.*)", st.session_state.res)
+            m = re.search(r"Monto:\s*([\d\.]+)", st.session_state.res)
+            if c: comercio = c.group(1).strip()
+            if m: monto = float(m.group(1))
         except:
             pass
 
-        st.subheader("📝 Confirmar datos")
-        f_comercio = st.text_input("Comercio", comercio)
-        f_monto = st.number_input("Monto ($)", value=monto, step=0.01)
+        st.subheader("📝 Confirmar")
+        f_c = st.text_input("Comercio", comercio)
+        f_m = st.number_input("Monto", value=monto, step=0.01)
 
-        if st.button("💾 Guardar gasto"):
+        if st.button("💾 Guardar"):
             st.session_state.historial.append({
-                "Comercio": f_comercio,
-                "Monto": f_monto,
+                "Comercio": f_c,
+                "Monto": f_m,
                 "Fecha": pd.Timestamp.now().strftime("%d/%m/%Y")
             })
-            st.success("✅ Gasto registrado")
-            del st.session_state.res_ia
+            st.success("Guardado")
+            del st.session_state.res
 
 with col2:
-    st.header("📊 Historial de Gastos")
-
+    st.header("📊 Historial")
     if st.session_state.historial:
         df = pd.DataFrame(st.session_state.historial)
         st.table(df)
-        st.metric(
-            "💰 Total Acumulado",
-            f"${df['Monto'].sum():.2f}"
-        )
+        st.metric("Total", f"${df['Monto'].sum():.2f}")
     else:
-        st.info("Aún no hay gastos registrados")
-
-# =============================
-# TEST DIRECTO GEMINI
-# =============================
-st.divider()
-st.subheader("🧪 Test Gemini")
-
-if st.button("Probar conexión Gemini"):
-    try:
-        model = genai.GenerativeModel("gemini-1.0-pro")
-        r = model.generate_content(
-            "Di hola y confirma que Gemini funciona correctamente",
-            request_options={"timeout": 10}
-        )
-        st.success(r.text)
-    except Exception as e:
-        st.error(e)
+        st.info("Sin registros aún")
